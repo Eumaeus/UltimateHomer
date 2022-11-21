@@ -16,6 +16,9 @@ begin
 	using EzXML
 end
 
+# ╔═╡ 631f349a-e339-4dca-94e2-19234c92c79f
+
+
 # ╔═╡ 7caf2ece-3164-431c-9d4b-00a89b691271
 md"""#### Set up and do a little testing on loading an XML Syntax file"""
 
@@ -42,10 +45,180 @@ md"""
 # ╔═╡ 3dc1b3f5-d60b-4427-841d-6c218b8c94a9
 md"""We will change the `index` properties to `Int64` when we're done testing."""
 
+# ╔═╡ 15263e0a-3566-4e55-8352-a08b22ba7461
+md"""
+Let's serialize an EpicToken record to tabular format.
+"""
+
+# ╔═╡ f967e8b2-9ed9-4636-8365-7acd5337ec5b
+md"""The below generate a header-row, tab-separated"""
+
+# ╔═╡ 035ca287-1f81-44c4-9929-688a58386a74
+function tabularEpicTokenHeader()
+	"Urn	tokenIndex	tokenCtsUrn	surfaceForm	passageCtsUrn	sentenceUrn	sentenceSpanUrn	lemmaString	lexUrn	posTag	headIndex	headUrn	relationAbbr	relationUrn	relationLabel	speakerLabel	speakerUrn	morphLabel	POSUrn	POSLabel	numberUrn	numberLabel	tenseUrn	tenseLabel	moodUrn	moodLabel	voiceUrn	voiceLabel	genderUrn	genderLabel	grammaticalCaseUrn	grammaticalCaseLabel	degreeUrn	degreeLabel"
+end
+
+# ╔═╡ fcf317b0-6dd2-42c6-8713-3facf3cff9b1
+tabularEpicTokenHeader()
+
+# ╔═╡ 192eb118-57a4-4209-ad84-fab8b5693159
+md"""
+### Process XML!
+"""
+
+# ╔═╡ 944cc2d5-6be8-4e71-b9bf-b3a4f8e766a8
+md"""**First Pass** We grab the easy stuff from the XML attributes."""
+
+# ╔═╡ db78845e-9134-4a05-a2a0-ea8492027918
+md"""#### Another mapping to get the token-index in place, and to deal with empty Citations."""
+
+
+# ╔═╡ 858378c7-cd4c-41cd-93fc-106a6af3e432
+md"""
+Do a "zip-with-index" on the whole thing, and use that to populate the tokenIndex property.
+"""
+
+# ╔═╡ 4b5ac42f-f211-4d45-a6ea-ce2c25c8260d
+md"""
+
+### Fill In Missing CTS URNs
+
+We assume that missing `canonicalCitation` records are punctuation. We assume that no *Iliad* line begins with punctuation, so each punctuation mark must have the same CTS-URN as the *preceding* token.
+
+"""
+
+# ╔═╡ 3679562c-964a-481f-8a5c-d873070b0b47
+md"""We now want to add token-level CtsUrns in the `tokenCitation` property. We'll start by generating, from the data, a Vector of all valid CtsUrns (at the edition-level, book + line)."""
+
+# ╔═╡ 2017ef58-a1b4-4429-85e3-54d5f10f0af0
+md"""
+	The below works, but takes a **long** time. So we'll disable it for now, and generate those URNs as the last step. No need to be re-doing it with every update.
+"""
+
+# ╔═╡ 744f91eb-b548-4090-b2fb-4620bb373fcb
+#=
+withTokenLevelUrns = map(Iterators.take(validUrns, 1000)) do u
+	lineTokens = filter(iliadTokenVec3) do t
+		t.canonicalCitation == u
+	end
+	map(collect(enumerate(lineTokens))) do (i, t)
+		t.tokenCitation = CtsUrn(string(t.canonicalCitation) * ".$i" )
+		t
+	end 
+end |> Iterators.flatten |> collect
+=#
+
+# ╔═╡ 857ecb3a-e195-4859-bddb-6821ae03b3fa
+md"""
+### Work with the morphology of each token!
+
+This will require some tests, because I think we have a lot of bad data.
+"""
+
+# ╔═╡ 867cc35d-f364-4a1b-83a2-6c9283e41250
+md"""If the above works, we are good!"""
+
+# ╔═╡ 5079fb39-7c46-4421-95dd-88371c8ff72f
+md"""
+## Morphology Stuff Below!
+"""
+
+# ╔═╡ 8ead2580-0275-4ba9-a500-790ad58a72f0
+md"""#### We create a basic `struct` to hold the versions of a pos-element we want"""
+
+# ╔═╡ a23071ce-7184-44dd-a423-9465e4aacd7e
+Base.@kwdef mutable struct MorphRecord
+	posTag::String = ""
+	short::String = ""
+	long::String = ""
+	urnString::String = ""
+end
+
+# ╔═╡ e3c5b465-37e8-43ba-8aa8-870321a559df
+md""" 
+
+**Overriding Equality!** The two functions below are necessary for us to compare `MorphRecord` objects. 
+
+"""
+
+# ╔═╡ 7b0f510a-4a21-49cd-b80c-4aac003c713c
+function Base.:(==)(mr1::MorphRecord, mr2::MorphRecord)
+	if ((mr1.posTag == mr2.posTag) &&
+		(mr1.short == mr2.short) &&
+		(mr1.long == mr2.long) &&
+		(mr1.urnString == mr2.urnString))
+	
+		true
+	else
+		false
+	end
+end
+
+# ╔═╡ 2af42b75-4b13-4314-85f9-1df91968bfa1
+function isequal(mr1::MorphRecord, mr2::MorphRecord)
+	if ((mr1.posTag == mr2.posTag) &&
+		(mr1.short == mr2.short) &&
+		(mr1.long == mr2.long) &&
+		(mr1.urnString == mr2.urnString) 
+	)
+	
+		true
+	else
+		false
+	end
+	
+end
+
+# ╔═╡ 11b3f65f-3062-4ff2-ae7a-227d14f21f07
+md"""#### Let's set up some constants here, which we can use repeatedly"""
+
+# ╔═╡ efe42e6d-d20f-44d6-9706-946c63f400c5
+begin
+	# Null values
+	const nullUrn = Cite2Urn("urn:cite2:fuFolio:uh.2022:null")
+	const emptyMorphRecord = MorphRecord("", "", "", "")
+
+	# Keeping track of indices for POStag parts
+	posNum = 1
+	personNum = 2
+	numberNum = 3
+	tenseNum = 4
+	moodNum = 5
+	voiceNum = 6
+	genderNum = 7
+	caseNum = 8
+	degreeNum = 9
+
+	nothing
+end
+
+# ╔═╡ 1ac5df9c-870d-4985-b1c7-b924c59aa673
+md""" ### Morphology Struct
+"""
+
+# ╔═╡ ad6a60bb-a15f-41ee-b335-69fc46239c0d
+md"""
+We make a Struct for morphology, with default value as `emptyMorphRecord`, since no form is going to have *all* properties.
+"""
+
+# ╔═╡ e11f6ef9-7624-44e5-adf4-453e685b8c07
+Base.@kwdef mutable struct Morphology
+	pos::MorphRecord = emptyMorphRecord
+	person::MorphRecord = emptyMorphRecord
+	number::MorphRecord = emptyMorphRecord
+	voice::MorphRecord = emptyMorphRecord
+	mood::MorphRecord = emptyMorphRecord
+	tense::MorphRecord = emptyMorphRecord
+	gender::MorphRecord = emptyMorphRecord
+	grammaticalCase::MorphRecord = emptyMorphRecord
+	degreeMorphRecord = emptyMorphRecord
+end
+
 # ╔═╡ 2d9df754-d2a3-4a68-8655-a5bc63db37a2
 Base.@kwdef mutable struct EpicToken
 	sentenceIndex::Union{Int64, Nothing}
 	sentenceUrn::Union{Cite2Urn, Nothing}
+	sentenceSpanUrn::Union{CtsUrn, Nothing} = nothing
 	wordSyntaxIndex::Union{Int64, Nothing} = nothing # order in sentence
 	tokenIndex::Union{Int64, Nothing} = nothing # in the whole poem
 	sentenceID::String = ""
@@ -53,24 +226,18 @@ Base.@kwdef mutable struct EpicToken
 	tokenUrn::Union{Cite2Urn, Nothing} # Cite2Urn
 	form::String = ""
 	lemma::String = ""
-	lemmaUrn::Union{Cite2Urn, Nothing} = nothing
+	lexUrn::Union{Cite2Urn, Nothing} = nothing
 	postag::String = ""
+	morphology::Union{Morphology, Nothing} = nothing
+	morphLabel::String = ""
 	relation::String = ""
+	relationUrn::Union{CtsUrn, Nothing} = nothing
+	speakerLabel::String = ""
+	speakerUrn::Union{Cite2Urn, Nothing} = nothing
 	head::Union{String, Nothing}
-	canonicalCitation::Union{CtsUrn, Nothing}
-	tokenCitation::Union{CtsUrn, Nothing}
+	canonicalCitation::Union{CtsUrn, Nothing} # Book + Line, e.g. μῆνιν = "1.1"
+	tokenCitation::Union{CtsUrn, Nothing} # Book + Line + Token, e.g. μῆνιν = "1.1.1"
 end
-
-# ╔═╡ 192eb118-57a4-4209-ad84-fab8b5693159
-md"""
-### Process XML!
-"""
-
-# ╔═╡ aa956ec9-1a98-435c-b90e-b98bcdc476bc
-CtsUrn("urn:cts:greekLit:tlg0012.tlg001:1.154")
-
-# ╔═╡ 944cc2d5-6be8-4e71-b9bf-b3a4f8e766a8
-md"""**First Pass**"""
 
 # ╔═╡ 72bfb9e8-20d8-4354-bcb8-fefc1f4a0569
 iliadTokenVec1 = map(collect(enumerate(iliadSents))) do (index, sent)
@@ -85,15 +252,22 @@ iliadTokenVec1 = map(collect(enumerate(iliadSents))) do (index, sent)
 			tokenUrn = Cite2Urn("urn:cite2:fuUltHomer:iliadtokens.2022a:$(sentenceID)_$index"),
 			sentenceID = sentenceID,
 			wordID = word["id"],
-			form = begin
+			# This replaces the "form" for ellipsis with an… uh… ellipsis
+			form = begin 
 				if (word["form"] == "[0]") "[…]"
 				else word["form"]
 				end
 			end,
 			lemma = word["lemma"],
-			postag = word["postag"],
+			# Ellipsis tokens do not come with postags. Sigh.
+			postag = begin
+				if (word["postag"] == "") "u--------"
+				else word["postag"]
+				end
+			end,
 			relation = word["relation"],
 			head = word["head"],
+			# Punctuation does not, by default, get a CTS-URN, for some reason. We'll fix this later.
 			canonicalCitation = begin
 				if (word["cite"] != "")
 					CtsUrn(word["cite"])
@@ -105,17 +279,15 @@ iliadTokenVec1 = map(collect(enumerate(iliadSents))) do (index, sent)
 		)
 		thisToken
 	end
-end |> Iterators.flatten |> collect
+end |> Iterators.flatten |> collect 
+
+# At the end is the invokation to turn a Vector{Vector{Something}} into a Vector{Something}
 
 # ╔═╡ 5a5008b8-8de9-4573-a2dd-8b75b7336f13
-length(iliadTokenVec1)
+length(iliadTokenVec1) # Sanity check
 
 # ╔═╡ 4a61f08e-d6cf-4c39-a946-59086bdd44d4
-typeof(iliadTokenVec1)
-
-# ╔═╡ db78845e-9134-4a05-a2a0-ea8492027918
-md"""### Another mapping to get the token-index in place, and to deal with empty Citations."""
-
+typeof(iliadTokenVec1) # Sanity check
 
 # ╔═╡ cba29ae7-1513-40b4-b2ce-db4cddd72f0f
 iliadTokenVec2 = map(collect(enumerate(iliadTokenVec1))) do (i, t)
@@ -125,13 +297,417 @@ iliadTokenVec2 = map(collect(enumerate(iliadTokenVec1))) do (i, t)
 end
 
 # ╔═╡ 1e7cd5a9-3122-4181-a4d2-a0a4f579208f
-typeof(iliadTokenVec2)
-
-# ╔═╡ 2c4a27a5-f926-4e4c-98b1-6f4716c83583
-
+typeof(iliadTokenVec2) # Sanity check
 
 # ╔═╡ 851feeea-68a3-437e-8aaa-f94c5a6dee5d
+iliadTokenVec3 = map(collect(enumerate(iliadTokenVec2))) do (i, t)
+	if (t.canonicalCitation == nothing)
+		t.canonicalCitation = iliadTokenVec2[i-1].canonicalCitation
+	end
+	t
+end
 
+# ╔═╡ 7898ac85-f16d-42fc-8625-cb430d1aab6d
+validUrns = map(t -> t.canonicalCitation, iliadTokenVec3) |> unique
+
+# ╔═╡ 9d66251a-4d6c-4a6a-bd77-f65091552f25
+length(validUrns) # sanity check
+
+# ╔═╡ 8b63d18e-741c-426a-ade9-82005a6a91b1
+# Let's get a list of forms, their CtsUrn, and their POS-Tag
+
+justPOS = map(iliadTokenVec3) do t
+	(t.canonicalCitation, t.form, t.postag)
+end
+
+# ╔═╡ 5992c467-79f8-48fc-a33d-8eb1780fa956
+# Do they all have 9 characters?
+
+filter(justPOS) do t
+	length(t[3]) != 9
+end |> length == 0
+
+# ╔═╡ f851a534-e0e7-4e95-b277-ff4d78d464ae
+md"""### Serialization Functions"""
+
+# ╔═╡ 0d74143a-90a7-4056-8c40-925793572b3c
+#= morphLabel	POSUrn	POSLabel	numberUrn	numberLabel	tenseUrn	tenseLabel	moodUrn	moodLabel	voiceUrn	voiceLabel	genderUrn	genderLabel	grammaticalCaseUrn	grammaticalCaseLabel	degreeUrn	degreeLabel =#
+
+# ╔═╡ ed6d529a-cab3-49f0-8bcc-5d775cfd30dc
+begin
+	
+	import Base.string
+
+	function posTag(mr::MorphRecord)
+		if (mr.posTag == "")
+			"-"
+		else
+			mr.posTag
+		end
+	end
+
+	function string(mr::MorphRecord)
+		if (mr.long == "")
+			""
+		else
+			mr.long
+		end
+	end
+
+	
+	function string(m::Morphology)
+		mvs = [string(m.pos), string(m.person), string(m.number), string(m.voice), string(m.mood), string(m.tense), string(m.gender), string(m.grammaticalCase), string(m.degreeMorphRecord)]
+
+		noblanks = filter(mvs) do s
+			length(s) > 0
+		end
+
+
+		join(noblanks, ", ")
+		
+	end
+
+	function posTag(m::Morphology)
+		mvs = [posTag(m.pos), posTag(m.person), posTag(m.number), posTag(m.voice), posTag(m.mood), posTag(m.tense), posTag(m.gender), posTag(m.grammaticalCase), posTag(m.degreeMorphRecord)]
+
+		join(mvs)
+
+	end
+	
+end
+
+# ╔═╡ 2906bc60-230b-40e3-88a8-fb8dc75bcbb9
+function tabularMorphology(m::Morphology)
+	tabs = [
+		string(posTag(m)),
+		m.pos.urnString,
+		m.pos.long,
+		m.number.urnString,
+		m.number.long
+		
+		
+	]
+	join(tabs, "\t")
+end
+
+# ╔═╡ e20b9349-64c6-4d57-98b9-bfdf9c468f3b
+function tabularEpicToken(t::EpicToken)
+	rowVals = [
+		string(t.tokenUrn),
+		string(t.tokenIndex),
+		string(t.tokenCitation),
+		t.form,
+		string(t.canonicalCitation),
+		string(t.sentenceUrn),
+		string(t.sentenceSpanUrn),
+		t.lemma,
+		string(t.lexUrn),
+		t.postag,
+		string(t.head),
+		"headUrnGoesHere",
+		t.relation,
+		t.relationUrn,
+		t.relation,
+		t.speakerLabel,
+		"speakerUrnGoesHere"
+	]
+	morphTabs = tabularMorphology(t.morphology)
+	joinedLists = vcat(rowVals, morphTabs)
+	tabbed = join(joinedLists, "\t")
+	tabbed
+end
+
+# ╔═╡ 4e895c5e-e67d-43f2-a194-d250f86896fb
+tabularEpicToken(iliadTokenVec3[2])
+
+# ╔═╡ 84f30403-e3b9-40de-a433-29d418892b18
+md"""
+## Parse POSTag
+"""
+
+# ╔═╡ 65860a30-d4d2-4d6c-acb4-ce1dee36533e
+md"""
+Accept a POSTag; split it; treat each of the nine parts.
+"""
+
+# ╔═╡ 40dc7937-1a1d-4551-962c-c20905a2c965
+begin
+function getPos(s::String)
+	posDict = Dict(
+		# Part of Speech
+		"l" => MorphRecord("l", "art", "article", "urn:cite2:fuGreekMorph:pos.2022:article"),
+		"n" => MorphRecord("n", "noun", "noun", "urn:cite2:fuGreekMorph:pos.2022:noun"),
+		"a" => MorphRecord("a", "adj", "adjective", "urn:cite2:fuGreekMorph:pos.2022:adjective"),
+		"p" => MorphRecord("p", "pron", "pronoun", "urn:cite2:fuGreekMorph:pos.2022:pronoun"),
+		"v" => MorphRecord("v", "vb", "verb", "urn:cite2:fuGreekMorph:pos.2022:verb"),
+		"d" => MorphRecord("d", "adv", "adverb", "urn:cite2:fuGreekMorph:pos.2022:adverb"),
+		"r" => MorphRecord("r", "prep", "preposition", "urn:cite2:fuGreekMorph:pos.2022:preposition"),
+		"c" => MorphRecord("c", "conj", "conjunction", "urn:cite2:fuGreekMorph:pos.2022:conjunction"),
+		"e" => MorphRecord("e", "excl", "exclamation", "urn:cite2:fuGreekMorph:pos.2022:exclamation"),
+		"i" => MorphRecord("i", "inter", "interjection", "urn:cite2:fuGreekMorph:pos.2022:interjection"),
+		"u" => MorphRecord("u", "punc", "punctuation", "urn:cite2:fuGreekMorph:pos.2022:punctuation"),
+		"g" => MorphRecord("g", "partic", "particle", "urn:cite2:fuGreekMorph:pos.2022:particle"),
+		"m" => MorphRecord("m", "num", "number", "urn:cite2:fuGreekMorph:pos.2022:number"),
+		"x" => MorphRecord("x", "irr", "irregular", "urn:cite2:fuGreekMorph:pos.2022:irregular"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getPerson(s::String)
+	posDict = Dict(
+		# Person
+		"1" => MorphRecord("1", "1st", "1st person", "urn:cite2:fuGreekMorph:person.2022:1"),
+		"2" => MorphRecord("2", "2nd", "2nd person", "urn:cite2:fuGreekMorph:person.2022:2"),
+		"3" => MorphRecord("3", "3rd", "3rd person", "urn:cite2:fuGreekMorph:person.2022:3"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getNumber(s::String)
+	posDict = Dict(
+		# Number
+		"s" => MorphRecord("s", "sing", "singular", "urn:cite2:fuGreekMorph:number.2022:singular"),
+		"d" => MorphRecord("d", "dl", "dual", "urn:cite2:fuGreekMorph:number.2022:plural"),
+		"p" => MorphRecord("p", "pl", "plural", "urn:cite2:fuGreekMorph:number.2022:dual"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getVoice(s::String)
+	posDict = Dict(
+		# Voice
+		"a" => MorphRecord("a", "act", "active", "urn:cite2:fuGreekMorph:voice.2022:active"),
+		"m" => MorphRecord("m", "mid", "middle", "urn:cite2:fuGreekMorph:voice.2022:middle"),
+		"p" => MorphRecord("p", "pass", "passive", "urn:cite2:fuGreekMorph:voice.2022:passive"),
+		"e" => MorphRecord("e", "m/p", "medio-passive", "urn:cite2:fuGreekMorph:voice.2022:mediopassive"),
+		"d" => MorphRecord("d", "dep", "deponent", "urn:cite2:fuGreekMorph:voice.2022:deponent"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getMood(s::String)
+	posDict = Dict(
+		# Mood
+		"i" => MorphRecord("i", "indic", "indicative", "urn:cite2:fuGreekMorph:mood.2022:indicative"),
+		"s" => MorphRecord("s", "subj", "subjunctive", "urn:cite2:fuGreekMorph:mood.2022:subjunctive"),
+		"n" => MorphRecord("n", "inf", "infinitive", "urn:cite2:fuGreekMorph:mood.2022:infinitive"),
+		"m" => MorphRecord("m", "imp", "imperative", "urn:cite2:fuGreekMorph:mood.2022:imperative"),
+		"p" => MorphRecord("p", "part", "participle", "urn:cite2:fuGreekMorph:mood.2022:participle"),
+		"o" => MorphRecord("o", "opt", "optative", "urn:cite2:fuGreekMorph:mood.2022:optative"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getTense(s::String)
+	posDict = Dict(
+		# Tense
+		"p" => MorphRecord("p", "pres", "present", "urn:cite2:fuGreekMorph:tense.2022:present"),
+		"i" => MorphRecord("i", "imperf", "imperfect", "urn:cite2:fuGreekMorph:tense.2022:imperfect"),
+		"r" => MorphRecord("r", "perf", "perfect", "urn:cite2:fuGreekMorph:tense.2022:perfect"),
+		"l" => MorphRecord("l", "plupf", "pluperfect", "urn:cite2:fuGreekMorph:tense.2022:pluperfect"),
+		"t" => MorphRecord("t", "futpf", "future perfect", "urn:cite2:fuGreekMorph:tense.2022:futureperfect"),
+		"f" => MorphRecord("f", "fut", "future", "urn:cite2:fuGreekMorph:tense.2022:future"),
+		"a" => MorphRecord("a", "aor", "aorist", "urn:cite2:fuGreekMorph:tense.2022:aorist"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getGender(s::String)
+	posDict = Dict(
+		# Gender
+		"m" => MorphRecord("m", "masc", "masculine", "urn:cite2:fuGreekMorph:gender.2022:masculine"),
+		"f" => MorphRecord("f", "fem", "feminine", "urn:cite2:fuGreekMorph:gender.2022:feminine"),
+		"n" => MorphRecord("n", "neu", "neuter", "urn:cite2:fuGreekMorph:gender.2022:neuter"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getCase(s::String)
+	posDict = Dict(
+		# Case
+		"n" => MorphRecord("n", "nom", "nominative", "urn:cite2:fuGreekMorph:case.2022:nominative"),
+		"g" => MorphRecord("g", "gen", "genitive", "urn:cite2:fuGreekMorph:case.2022:genitive"),
+		"d" => MorphRecord("d", "dat", "dative", "urn:cite2:fuGreekMorph:case.2022:dative"),
+		"a" => MorphRecord("a", "acc", "accusative", "urn:cite2:fuGreekMorph:case.2022:accusative"),
+		"v" => MorphRecord("v", "voc", "vocative", "urn:cite2:fuGreekMorph:case.2022:vocative"),
+		"l" => MorphRecord("l", "loc", "locative", "urn:cite2:fuGreekMorph:case.2022:locative"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+function getDegree(s::String)
+	posDict = Dict(
+		# Degree
+		"p" => MorphRecord("p", "pos", "positive", "urn:cite2:fuGreekMorph:degree.2022:positive"),
+		"c" => MorphRecord("c", "comp", "comparative", "urn:cite2:fuGreekMorph:degree.2022:comparative"),
+		"s" => MorphRecord("s", "sup", "superlative", "urn:cite2:fuGreekMorph:degree.2022:superlative"),
+		"-" => emptyMorphRecord
+	)
+
+	try 
+		if (s in keys(posDict)) 
+			posDict[s]
+		else 
+			println(""" "$s" is not a valid value. The valid values are $(keys(posDict)).""")
+		end
+	catch e
+		println(e)
+	end
+	
+end
+
+end
+
+
+# ╔═╡ e097f26e-6453-4b10-b125-717588c92308
+function getMorphology(pt::String)
+	try
+
+		ptArray = map( c -> string(c), split(pt, ""))
+
+		
+		Morphology(
+			getPos(ptArray[posNum]),
+			getPerson(ptArray[personNum]),
+			getNumber(ptArray[numberNum]),
+			getVoice(ptArray[voiceNum]),
+			getMood(ptArray[moodNum]),
+			getTense(ptArray[tenseNum]),
+			getGender(ptArray[genderNum]),
+			getCase(ptArray[caseNum]),
+			getDegree(ptArray[degreeNum])
+		)
+		
+		
+			
+	catch e
+		println(e)
+		# println(""" "$pt" must have 9 characters; it has $(length(pt)) characters.""")
+	end
+
+	
+end
+
+# ╔═╡ 234e7bbf-1078-4d86-bbf5-2fe0421b26bc
+# let's try this…
+map(justPOS) do p
+	try 
+		p[2] * ": " * string(getMorphology(p[3]))
+	catch e
+		println("""Bad data for: $p[1], "$p[2]", "$p[3]" """)
+	end
+end
+
+# ╔═╡ 903ff1d8-3ce9-4b80-8611-048a012d0b1c
+md"""A little testing."""
+
+# ╔═╡ e802b212-d98b-425c-9132-948f3feae5fc
+begin
+	pt1 = "n-s---fa-" # μῆνιν
+	pt2 = "v2spma---" # ἄειδε
+	pt3 = "n-s---fv-" # θεὰ
+	pt4 = "a-s---fa-" # οὐλομένην
+	pt5 = "u--------" # ',' (comma)
+	pt6 = "v3siie---" # ἐτελείετο
+	pt7 = "a-s---mnc" # σαώτερος
+	pt8 = "v-sappmn-" # χολωθεὶς
+	pt9 = "v3saia---" # ὄρσε
+	pt10 = "v-sfpmmn-" # λυσόμενός
+	pt11 = "g--------" # τε
+	pt12 = "p-s---mg-" # οὗ 
+end
+
+# ╔═╡ ad786f23-1e50-45e9-a6af-18b6465514e9
+# "n-s---fa-" # μῆνιν
+string(getMorphology(pt1))
 
 # ╔═╡ 4a6db3bb-95bc-47ae-9513-ffaa0cc4acda
 md"""### Standbox below"""
@@ -736,6 +1312,7 @@ version = "17.4.0+0"
 
 # ╔═╡ Cell order:
 # ╠═4fbd0098-5b2e-11ed-1a87-11df2c7d3e12
+# ╠═631f349a-e339-4dca-94e2-19234c92c79f
 # ╟─7caf2ece-3164-431c-9d4b-00a89b691271
 # ╠═4d074d84-84ac-479b-b048-fe9833e06c69
 # ╠═560adbd8-1316-4ae4-b1b8-72aac8ef5bfa
@@ -745,17 +1322,55 @@ version = "17.4.0+0"
 # ╟─87dbb837-a07b-4579-b1b7-59544ab61400
 # ╟─3dc1b3f5-d60b-4427-841d-6c218b8c94a9
 # ╠═2d9df754-d2a3-4a68-8655-a5bc63db37a2
+# ╠═4e895c5e-e67d-43f2-a194-d250f86896fb
+# ╟─15263e0a-3566-4e55-8352-a08b22ba7461
+# ╠═e20b9349-64c6-4d57-98b9-bfdf9c468f3b
+# ╟─f967e8b2-9ed9-4636-8365-7acd5337ec5b
+# ╠═035ca287-1f81-44c4-9929-688a58386a74
+# ╠═fcf317b0-6dd2-42c6-8713-3facf3cff9b1
 # ╟─192eb118-57a4-4209-ad84-fab8b5693159
-# ╠═aa956ec9-1a98-435c-b90e-b98bcdc476bc
 # ╟─944cc2d5-6be8-4e71-b9bf-b3a4f8e766a8
 # ╠═72bfb9e8-20d8-4354-bcb8-fefc1f4a0569
 # ╠═5a5008b8-8de9-4573-a2dd-8b75b7336f13
 # ╠═4a61f08e-d6cf-4c39-a946-59086bdd44d4
-# ╠═db78845e-9134-4a05-a2a0-ea8492027918
+# ╟─db78845e-9134-4a05-a2a0-ea8492027918
+# ╟─858378c7-cd4c-41cd-93fc-106a6af3e432
 # ╠═cba29ae7-1513-40b4-b2ce-db4cddd72f0f
 # ╠═1e7cd5a9-3122-4181-a4d2-a0a4f579208f
-# ╠═2c4a27a5-f926-4e4c-98b1-6f4716c83583
+# ╟─4b5ac42f-f211-4d45-a6ea-ce2c25c8260d
 # ╠═851feeea-68a3-437e-8aaa-f94c5a6dee5d
+# ╟─3679562c-964a-481f-8a5c-d873070b0b47
+# ╠═7898ac85-f16d-42fc-8625-cb430d1aab6d
+# ╠═9d66251a-4d6c-4a6a-bd77-f65091552f25
+# ╟─2017ef58-a1b4-4429-85e3-54d5f10f0af0
+# ╠═744f91eb-b548-4090-b2fb-4620bb373fcb
+# ╟─857ecb3a-e195-4859-bddb-6821ae03b3fa
+# ╠═8b63d18e-741c-426a-ade9-82005a6a91b1
+# ╠═5992c467-79f8-48fc-a33d-8eb1780fa956
+# ╠═234e7bbf-1078-4d86-bbf5-2fe0421b26bc
+# ╟─867cc35d-f364-4a1b-83a2-6c9283e41250
+# ╟─5079fb39-7c46-4421-95dd-88371c8ff72f
+# ╠═8ead2580-0275-4ba9-a500-790ad58a72f0
+# ╠═a23071ce-7184-44dd-a423-9465e4aacd7e
+# ╟─e3c5b465-37e8-43ba-8aa8-870321a559df
+# ╠═2af42b75-4b13-4314-85f9-1df91968bfa1
+# ╠═7b0f510a-4a21-49cd-b80c-4aac003c713c
+# ╟─11b3f65f-3062-4ff2-ae7a-227d14f21f07
+# ╠═efe42e6d-d20f-44d6-9706-946c63f400c5
+# ╟─1ac5df9c-870d-4985-b1c7-b924c59aa673
+# ╠═ad6a60bb-a15f-41ee-b335-69fc46239c0d
+# ╠═e11f6ef9-7624-44e5-adf4-453e685b8c07
+# ╟─f851a534-e0e7-4e95-b277-ff4d78d464ae
+# ╠═0d74143a-90a7-4056-8c40-925793572b3c
+# ╠═2906bc60-230b-40e3-88a8-fb8dc75bcbb9
+# ╠═ed6d529a-cab3-49f0-8bcc-5d775cfd30dc
+# ╟─84f30403-e3b9-40de-a433-29d418892b18
+# ╟─65860a30-d4d2-4d6c-acb4-ce1dee36533e
+# ╠═e097f26e-6453-4b10-b125-717588c92308
+# ╠═40dc7937-1a1d-4551-962c-c20905a2c965
+# ╠═903ff1d8-3ce9-4b80-8611-048a012d0b1c
+# ╠═e802b212-d98b-425c-9132-948f3feae5fc
+# ╠═ad786f23-1e50-45e9-a6af-18b6465514e9
 # ╟─4a6db3bb-95bc-47ae-9513-ffaa0cc4acda
 # ╠═f49f23b3-bf0b-4684-bfdf-02364fe05287
 # ╠═a7b1ab22-93a4-401a-92b9-e0f492f3ca27
